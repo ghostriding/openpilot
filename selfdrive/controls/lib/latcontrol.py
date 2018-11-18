@@ -50,7 +50,7 @@ class LatControl(object):
     self.angle_steers_des_time = 0.0
 
     # For Variable Steering Ratio
-    self.lowSteerRatio = 7.0
+    self.lowSteerRatio = 10.2
     self.variableSteerRatio = 0.0
     self.angle_Check = 0.0
     
