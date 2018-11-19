@@ -53,6 +53,7 @@ class LatControl(object):
     self.lowSteerRatio = 10.2
     self.variableSteerRatio = 0.0
     self.angle_Check = 0.0
+    self.manual_Steering_Offset = 0.0  # change this if your steering angle is off
     
   def reset(self):
     self.pid.reset()
@@ -102,8 +103,8 @@ class LatControl(object):
       # reset to current steer angle if not active or overriding
       if active:
         delta_desired = self.mpc_solution[0].delta[1]
-      else:
-        delta_desired = math.radians(self.angle_Check) / self.variableSteerRatio
+      else:                   # Add a steering offset vs recalibrating steering sensor so it reads near 0
+        delta_desired = math.radians(self.angle_Check + self.manual_Steering_Offset) / self.variableSteerRatio
 
       self.cur_state[0].delta = delta_desired
 
