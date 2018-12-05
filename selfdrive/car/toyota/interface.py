@@ -88,8 +88,9 @@ class CarInterface(object):
       ret.steerKpV, ret.steerKiV = [[1.20, 0.80, 0.60, 0.30], [0.16, 0.12, 0.08, 0.04]]
       ret.steerKf = 0.000078   # full torque for 10 deg at 80mph means 0.00007818594
       # TODO: Prius seem to have very laggy actuators. Understand if it is lag or hysteresis
-      ret.steerActuatorDelay = 0.16
-
+      #ret.steerActuatorDelay = 0.16
+      ret.steerActuatorDelay = 0.09
+      
     elif candidate in [CAR.RAV4, CAR.RAV4H]:
       stop_and_go = True if (candidate in CAR.RAV4H) else False
       ret.safetyParam = 73  # see conversion factor for STEER_TORQUE_EPS in dbc file
