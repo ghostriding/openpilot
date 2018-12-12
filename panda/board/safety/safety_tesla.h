@@ -11,15 +11,15 @@
 // 2m/s are added to be less restrictive
 const struct lookup_t TESLA_LOOKUP_ANGLE_RATE_UP = {
     {2., 7., 17.},
-    {5., .8, .25}};
+    {15., 15.8, 15.25}};
 
 const struct lookup_t TESLA_LOOKUP_ANGLE_RATE_DOWN = {
     {2., 7., 17.},
-    {5., 3.5, .8}};
+    {15., 13.5, 15.8}};
 
 const struct lookup_t TESLA_LOOKUP_MAX_ANGLE = {
     {2., 29., 38.},
-    {410., 92., 36.}};
+    {410., 492., 436.}};
 
 const int TESLA_RT_INTERVAL = 250000; // 250ms between real time checks
 
@@ -300,6 +300,125 @@ static int tesla_ign_hook()
   return tesla_ignition_started;
 }
 
+static void tesla_fwd_to_radar_as_is(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
+  CAN_FIFOMailBox_TypeDef to_send;
+  to_send.RIR = to_fwd->RIR | 1; // TXRQ
+  to_send.RDTR = to_fwd->RDTR;
+  to_send.RDLR = to_fwd->RDLR;
+  to_send.RDHR = to_fwd->RDHR;
+  can_send(&to_send, bus_num);
+}
+
+static void tesla_fwd_to_radar_modded(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
+  int32_t addr = to_fwd->RIR >> 21;
+  CAN_FIFOMailBox_TypeDef to_send;
+  to_send.RIR = to_fwd->RIR | 1; // TXRQ
+  to_send.RDTR = to_fwd->RDTR;
+  to_send.RDLR = to_fwd->RDLR;
+  to_send.RDHR = to_fwd->RDHR;
+  uint32_t addr_mask = 0x001FFFFF;
+  //now modd
+  if (addr == 0x405 )
+  {
+    to_send.RIR = (0x2B9 << 21) + (addr_mask & (to_fwd->RIR | 1));
+    if ((to_send.RDLR & 0x10) == 0x10)
+    {
+      int rec = to_send.RDLR &  0xFF;
+      if (rec == 0x12) {
+        to_send.RDHR = 0x36333537;
+        to_send.RDLR = 0x38304600 | rec;
+      }
+      if (rec == 0x10) {
+        to_send.RDLR = 0x00000000 | rec;
+        to_send.RDHR = 0x4a593500;
+      }
+      if (rec == 0x11) {
+        to_send.RDLR = 0x31415300 | rec;
+        to_send.RDHR = 0x46373248;
+      }
+    }
+  }
+  if (addr == 0x398 )
+  {
+    //change frontradarHW = 1 and dashw = 1
+    //SG_ GTW_dasHw : 7|2@0+ (1,0) [0|0] ""  NEO
+    //SG_ GTW_parkAssistInstalled : 11|2@0+ (1,0) [0|0] ""  NEO
+    to_send.RDLR = to_send.RDLR & 0xFFFFF33F;
+    to_send.RDLR = to_send.RDLR | 0x440;
+    to_send.RDHR = to_send.RDHR & 0xCFFFFFFF;
+    to_send.RDHR = to_send.RDHR | 0x10000000;
+    to_send.RIR = (0x2A9 << 21) + (addr_mask & (to_fwd->RIR | 1));
+  }
+  if (addr == 0x00E )
+  {
+    to_send.RIR = (0x199 << 21) + (addr_mask & (to_fwd->RIR | 1));
+  }
+  if (addr == 0x20A )
+  {
+    to_send.RIR = (0x159 << 21) + (addr_mask & (to_fwd->RIR | 1));
+  }
+  if (addr == 0x115 )
+  {
+    
+    int counter = ((to_fwd->RDLR & 0x000F0000) >> 16 ) & 0x0F;
+    to_send.RDTR = (to_fwd->RDTR & 0xFFFFFFF0) | 0x08;
+    to_send.RIR = (0x149 << 21) + (addr_mask & (to_fwd->RIR | 1));
+    to_send.RDLR = 0x6A022600;
+    int cksm = (0x95 + (counter << 4)) & 0xFF;
+    to_send.RDHR = 0x000F04AA | (counter << 20) | (cksm << 24);
+    can_send(&to_send, bus_num);
+
+    to_send.RDTR = (to_fwd->RDTR & 0xFFFFFFF0) | 0x06;
+    to_send.RIR = (0x129 << 21) + (addr_mask & (to_fwd->RIR | 1));
+    to_send.RDLR = 0x00000000 | (counter << 28);
+    cksm = (0x16 + (counter << 4)) & 0xFF;
+    to_send.RDHR = cksm;
+    
+  }
+  if (addr == 0x118 )
+  {
+    to_send.RIR = (0x119 << 21) + (addr_mask & (to_fwd->RIR | 1));
+    can_send(&to_send, bus_num);
+
+    int counter = to_fwd->RDHR  & 0x0F;
+    to_send.RIR = (0x169 << 21) + (addr_mask & (to_fwd->RIR | 1));
+    to_send.RDTR = (to_fwd->RDTR & 0xFFFFFFF0) | 0x08;
+    int32_t speed_kph = (((0xFFF0000 & to_send.RDLR) >> 16) * 0.05 -25) * 1.609 / 0.04;
+    if (speed_kph < 0) {
+      speed_kph = 0;
+    }
+
+    speed_kph = (int)(speed_kph/0.04) & 0x1FFF;
+    to_send.RDLR = (speed_kph | (speed_kph << 13) | (speed_kph << 26)) & 0xFFFFFFFF;
+    to_send.RDHR = ((speed_kph  >> 6) | (speed_kph << 7) | (counter << 20)) & 0x00FFFFFF;
+    int cksm = 0x76;
+    cksm = (cksm + (to_send.RDLR & 0xFF) + ((to_send.RDLR >> 8) & 0xFF) + ((to_send.RDLR >> 16) & 0xFF) + ((to_send.RDLR >> 24) & 0xFF)) & 0xFF;
+    cksm = (cksm + (to_send.RDHR & 0xFF) + ((to_send.RDHR >> 8) & 0xFF) + ((to_send.RDHR >> 16) & 0xFF) + ((to_send.RDHR >> 24) & 0xFF)) & 0xFF;
+    to_send.RDHR = to_send.RDHR | (cksm << 24);
+  }
+  if (addr == 0x108 )
+  {
+    to_send.RIR = (0x109 << 21) + (addr_mask & (to_fwd->RIR | 1));
+  }
+  if (addr == 0x308 )
+  {
+    to_send.RIR = (0x209 << 21) + (addr_mask & (to_fwd->RIR | 1));
+  }
+  if (addr == 0x045 )
+  {
+    to_send.RIR = (0x219 << 21) + (addr_mask & (to_fwd->RIR | 1));
+  }
+  if (addr == 0x148 )
+  {
+    to_send.RIR = (0x1A9 << 21) + (addr_mask & (to_fwd->RIR | 1));
+  }
+  if (addr == 0x30A)
+  {
+    to_send.RIR = (0x2D9 << 21) + (addr_mask & (to_fwd->RIR | 1));
+  }
+  can_send(&to_send, bus_num);
+}
+
 static int tesla_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd)
 {
 
@@ -307,6 +426,25 @@ static int tesla_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd)
 
   if (bus_num == 0)
   {
+
+    //check all messages we need to also send to radar unmoddified
+    /*if ((addr == 0x649 ) || (addr == 0x730 ) || (addr == 0x647 ) || (addr == 0x644 ) || (addr == 0x645 ) || (addr == 0x7DF ) || (addr == 0x64D ) || (addr == 0x64C ) || (addr == 0x643 ) || 
+       (addr == 0x64E ) || (addr == 0x671 ) || (addr == 0x674 ) || (addr == 0x675 ) || (addr == 0x672 ) || (addr == 0x673 ) || (addr == 0x7F1 ) || (addr == 0x641 ) || (addr == 0x790 ) || (addr == 0x64B ) || 
+       (addr == 0x64F ) || (addr == 0x71800 ) || (addr == 0x72B)) */
+    if ((addr == 0x641) || (addr == 0x537))
+    {
+      //these messages are just forwarded with the same IDs
+      tesla_fwd_to_radar_as_is(1, to_fwd);
+    }
+
+    //check all messages we need to also send to radar moddified
+    //145 does not exist, we use 115 at the same frequency to trigger
+    //175 does not exist, we use 118 at the same frequency to trigger and pass vehicle speed
+    if ((addr == 0x405 ) || (addr == 0x398 ) || (addr == 0x00E ) || (addr == 0x20A ) || (addr == 0x118 ) || (addr == 0x108 ) || (addr == 0x308 ) || 
+    (addr == 0x115 ) || (addr == 0x045 ) || (addr == 0x148 ) || (addr == 0x30A)) 
+    {
+      tesla_fwd_to_radar_modded(1, to_fwd);
+    }
 
     // change inhibit of GTW_epasControl
     if (addr == 0x101)
@@ -321,23 +459,37 @@ static int tesla_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd)
     // remove EPB_epasControl
     if (addr == 0x214)
     {
-      return false;
+      return -1;
     }
 
     return 2; // Custom EPAS bus
   }
+
+  if ((bus_num != 0) && (bus_num != 2)) {
+    //everything but the radar data 0x300-0x3FF will be forwarded to can 0
+    if ((addr > 0x300) && (addr <= 0x3FF)){ 
+      return -1;
+    }
+    return 0;
+  }
+
   if (bus_num == 2)
   {
 
     // remove GTW_epasControl in forwards
     if (addr == 0x101)
     {
-      return false;
+      return -1;
+    }
+
+    // remove Pedal in forwards
+    if ((addr == 0x520) || (addr == 0x521)) {
+      return -1;
     }
 
     return 0; // Chassis CAN
   }
-  return false;
+  return -1;
 }
 
 const safety_hooks tesla_hooks = {
